@@ -1,11 +1,9 @@
-from msilib.schema import Class
-
-
+from dataclasses import fields
 from rest_framework import serializers
-from .models import audios
+from .models import textTobeAudio
 
 
 class urlSerializer(serializers.ModelSerializer):
     class Meta:
-        model = audios
+        model = textTobeAudio
         fields = '__all__'
