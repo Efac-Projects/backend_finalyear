@@ -7,15 +7,19 @@ from ast import Return
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .serializers import urlSerializer
-import joblib
 import pandas as pd
 import numpy as np
 import librosa
 from sklearn.preprocessing import LabelEncoder
-import tensorflow as tf
-from keras.models import load_model
 import os
+from django.core.files.storage import default_storage
 
+
+import urllib.request
+import json
+import os
+import ssl
+from decouple import config
 
 labelencoder = LabelEncoder()
 
@@ -32,42 +36,8 @@ def apiOverview(request):
 # method to check machine learning output
 
 
-@api_view(['POST'])
-def checkStatues(request):
-    serializer = request.data
-    print("\n")
-    print(serializer)
-    print("\n")
-
-    category_list = ['Category1', 'Category2', 'Category3', 'Category4']
-    labelencoder = LabelEncoder()
-    labelencoder.fit(category_list)
-    labelencoder.transform(category_list)
-    try:
-        model = load_model(
-            "D:\Engineering\Sem_8\FYP\Project_App\Backend\API\models\classifier.h5")
-
-        filename = serializer['location']
-
-        print("\n")
-        print(filename)
-        print("\n")
-
-        audio, sample_rate = librosa.load(filename, res_type='kaiser_fast')
-        mfccs_features = librosa.feature.mfcc(
-            y=audio, sr=sample_rate, n_mfcc=40)
-        mfccs_scaled_features = np.mean(mfccs_features.T, axis=0)
-        mfccs_scaled_features = mfccs_scaled_features.reshape(1, -1)
-        predicted_label1 = model.predict(mfccs_scaled_features)
-        predicted_label = np.argmax(predicted_label1, axis=1)
-        #prediction_class = labelencoder.inverse_transform(predicted_label)
-
-        return Response(predicted_label)
-    except ValueError as e:
-        return Response(e.args[0], status.HTTP_400_BAD_REQUEST)
-
-
 # check hosted model
+# classification of category
 @api_view(['POST'])
 def checkHostedMOdel(request):
     serializer = request.data
@@ -79,33 +49,54 @@ def checkHostedMOdel(request):
     labelencoder = LabelEncoder()
     labelencoder.fit(category_list)
     labelencoder.transform(category_list)
+    filename = serializer['location']
+
+    audio, sample_rate = librosa.load(filename, res_type='kaiser_fast')
+    mfccs_features = librosa.feature.mfcc(
+        y=audio, sr=sample_rate, n_mfcc=40)
+    mfccs_scaled_features = np.mean(mfccs_features.T, axis=0)
+    mfccs_scaled_features = mfccs_scaled_features.reshape(1, -1)
+
+    # this line is needed if you use self-signed certificate in your scoring service.
+    allowSelfSignedHttps(True)
+
+    data = {
+        "input_data": mfccs_scaled_features.tolist()
+    }
+
+    body = str.encode(json.dumps(data))
+
+    url = 'https://classification.eastus.inference.ml.azure.com/score'
+    # Replace this with the API key for the web service
+    api_key = config('api_key')
+
+    # The azureml-model-deployment header will force the request to go to a specific deployment.
+    # Remove this header to have the request observe the endpoint traffic rules
+    headers = {'Content-Type': 'application/json',
+               'Authorization': ('Bearer ' + api_key), 'azureml-model-deployment': 'default'}
+
+    req = urllib.request.Request(url, body, headers)
+
+    print(req)
 
     try:
+        response = urllib.request.urlopen(req)
 
-        filename = serializer['location']
-
-        print("\n")
-        print(filename)
-        print("\n")
-
-        audio, sample_rate = librosa.load(filename, res_type='kaiser_fast')
-        mfccs_features = librosa.feature.mfcc(
-            y=audio, sr=sample_rate, n_mfcc=40)
-        mfccs_scaled_features = np.mean(mfccs_features.T, axis=0)
-        mfccs_scaled_features = mfccs_scaled_features.reshape(1, -1)
-        numpyData = {'instances':  mfccs_scaled_features}
-        encodedNumpyData = json.dumps(numpyData, cls=NumpyArrayEncorder)
-
-        url = 'http://c3d6fc8f-2805-4880-8275-4dce4ac202b6.eastus.azurecontainer.io/v1/models/audio-classifier-model:predict'
-        headers = {"Content-Type": "application/json"}
-        res = requests.post(url, data=encodedNumpyData, headers=headers).json()
-        np_array = np.array(res["predictions"])
-        predicted_label = np.argmax(np_array, axis=1)
+        result = response.read()
+        num_array = np.array(result).reshape(-1, 1)
+        predicted_label = np.argmax(num_array, axis=1)
         prediction_class = labelencoder.inverse_transform(predicted_label)
+        print(prediction_class)
 
         return Response(prediction_class)
-    except ValueError as e:
-        return Response(e.args[0], status.HTTP_400_BAD_REQUEST)
+    except urllib.error.HTTPError as error:
+        print("The request failed with status code: " + str(error.code))
+
+    # Print the headers - they include the requert ID and the timestamp, which are useful for debugging the failure
+        print(error.info())
+        print(error.read().decode("utf8", 'ignore'))
+
+        return Response(error.info())
 
 
 # method for check url
@@ -116,9 +107,60 @@ def sendUrl(request):
         serializer.save()
     return Response(serializer.data)
 
+# self signed https
 
-class NumpyArrayEncorder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, numpy.ndarray):
-            return obj.tolist()
-        return json.JSONEncoder.default(self, obj)
+
+def allowSelfSignedHttps(allowed):
+    # bypass the server certificate verification on client side
+    if allowed and not os.environ.get('PYTHONHTTPSVERIFY', '') and getattr(ssl, '_create_unverified_context', None):
+        ssl._create_default_https_context = ssl._create_unverified_context
+
+
+# send file to backend and extract mfcc features
+@api_view(['POST'])
+def level_prediction(request):
+    if request.method != "POST":
+        return
+
+    try:
+        file = request.FILES['File']
+        print(file)
+        if not file:
+            print("File Issue")
+            return Response("Error in file!", status=400)
+
+        try:
+            default_storage.save(file.name, file)
+            print("File saved", file.name)
+
+            audio, sample_rate = librosa.load(
+                f'../media/{file.name}', res_type='kaiser_fast')
+            mfccs_features = librosa.feature.mfcc(
+                y=audio, sr=sample_rate, n_mfcc=40)
+
+            print(mfccs_features)
+
+            # Do processing here
+            default_storage.delete(file.name)
+            print("File deleted", file.name)
+            return Response(mfccs_features, status=200)
+
+        except Exception as e:
+            print(e)
+
+    except Exception as e:
+        print(e)
+        return Response(f"Server Error!, {e}", status=500)
+
+
+# send reinforcement learnig schedule; research findings - comment y
+@api_view(['GET'])
+def sendOptimizeSchedule(request):
+    schedule = {
+        'Level6': [1, 1, 1, 1, 1, 1],
+        'Level7': [1, 1, 1, 1, 1, 1],
+        'Level8': [1, 1, 1, 1, 1, 1],
+        'Level9': [1, 1, 1, 1, 1, 1]
+    }
+
+    return Response(schedule)
