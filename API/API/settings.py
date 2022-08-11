@@ -85,30 +85,30 @@ WSGI_APPLICATION = 'API.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/3.2/ref/settings/#databases
 
-# if os.environ.get('DATABASE_URL'):
-#     DATABASES = {
-#         'default': dj_database_url.config(default=os.environ.get('DATABASE_URL'))
-#     }
+if os.environ.get('DATABASE_URL'):
+    DATABASES = {
+        'default': dj_database_url.config(default=os.environ.get('DATABASE_URL'))
+    }
 
-# else:
-#     DATABASES = {
-#         'default': {
-#             'ENGINE': 'django.db.backends.sqlite3',
-#             'NAME': BASE_DIR / 'db.sqlite3',
-#         }
-#     }
-
-DATABASES = {
-    'default': {
-        'ENGINE': 'djongo',
-        'NAME': 'django',
-        'CLIENT': {
-            'host': '',
-            'username': '',
-            'password': ''
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
         }
     }
-}
+
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'djongo',
+#         'NAME': 'django',
+#         'CLIENT': {
+#             'host': 'mongodb+srv://thilina1234:91mXW21nlQ28fA67@cluster0.mysizmo.mongodb.net/?retryWrites=true&w=majority',
+#             'username': '',
+#             'password': ''
+#         }
+#     }
+# }
 
 
 REST_FRAMEWORK = {
